@@ -1,3 +1,4 @@
+from aiohttp import web
 import asyncio
 import sqlite3
 import logging
@@ -7,21 +8,33 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-# --- 1. SOZLAMALAR ---
+# --- 1. RENDER UCHUN VEB-SERVER (O'CHIB QOLMASLIGI UCHUN) ---
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def start_server():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render 10000-portni qidiradi
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    await site.start()
+    print("✅ Veb-server 10000-portda ishga tushdi")
+
+# --- 2. SOZLAMALAR ---
 API_TOKEN = '8770677204:AAFEcS1Iu5aseazXKVQwq9OYyn9RIJRUmGs'
-# BU YERGA @userinfobot ORQALI OLGAN ID RAQAMINGIZNI YOZING:
 ADMIN_ID = 7230209120
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# Kino qo'shish bosqichlari
 class MovieAdd(StatesGroup):
     waiting_for_video = State()
     waiting_for_code = State()
 
-# --- 2. BAZANI ISHGA TUSHIRISH ---
+# --- 3. BAZANI ISHGA TUSHIRISH ---
 def init_db():
     conn = sqlite3.connect('kc_studio.db')
     cursor = conn.cursor()
@@ -32,7 +45,7 @@ def init_db():
 
 init_db()
 
-# --- 3. PREMIUM TUGMALAR ---
+# --- 4. PREMIUM TUGMALAR ---
 def get_main_menu():
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔍 Kino qidirish bo'yicha yordam", callback_data="help_search"))
@@ -43,7 +56,7 @@ def get_main_menu():
     builder.row(types.InlineKeyboardButton(text="ℹ️ Biz haqimizda", callback_data="about"))
     return builder.as_markup()
 
-# --- 4. ASOSIY BUYRUQLAR ---
+# --- 5. BUYRUQLAR VA LOGIKA ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     welcome_text = (
@@ -54,7 +67,6 @@ async def cmd_start(message: types.Message):
     )
     if message.from_user.id == ADMIN_ID:
         welcome_text += "\n\n👨‍💻 **Admin:** Kino qo'shish uchun /add buyrug'ini bosing."
-        
     await message.answer(welcome_text, reply_markup=get_main_menu(), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "help_search")
@@ -67,7 +79,6 @@ async def about_kc(callback: types.CallbackQuery):
     await callback.message.answer("🎬 **KC Studio** — professional video va kino kontent platformasi.\nAsoschi: **Alisher Kenjayev**")
     await callback.answer()
 
-# --- 5. ADMIN PANEL (Kino qo'shish tizimi) ---
 @dp.message(Command("add"), F.from_user.id == ADMIN_ID)
 async def start_add_movie(message: types.Message, state: FSMContext):
     await message.answer("📥 Menga kino **videosini** yuboring:")
@@ -84,7 +95,6 @@ async def save_movie_to_db(message: types.Message, state: FSMContext):
     data = await state.get_data()
     m_code = message.text
     m_video = data['v_id']
-    
     conn = sqlite3.connect('kc_studio.db')
     cursor = conn.cursor()
     try:
@@ -97,17 +107,14 @@ async def save_movie_to_db(message: types.Message, state: FSMContext):
         conn.close()
         await state.clear()
 
-# --- 6. KINO QIDIRUV (Avtomatik ishlaydi) ---
 @dp.message()
 async def search_movie(message: types.Message):
     query_code = message.text
-    
     conn = sqlite3.connect('kc_studio.db')
     cursor = conn.cursor()
     cursor.execute("SELECT file_id FROM movies WHERE code=?", (query_code,))
     result = cursor.fetchone()
     conn.close()
-
     if result:
         await message.answer_video(
             video=result[0], 
@@ -115,13 +122,15 @@ async def search_movie(message: types.Message):
             parse_mode="Markdown"
         )
     else:
-        # Agar admin bo'lmasa va kod topilmasa, xato xabari
         if message.from_user.id != ADMIN_ID or not message.text.startswith('/'):
             await message.answer("😔 Kechirasiz, bu kod bilan kino topilmadi.\nIltimos, kodni to'g'ri yozganingizni tekshiring.")
 
-# --- 7. BOTNI ISHGA TUSHIRISH ---
+# --- 6. ASOSIY ISHGA TUSHIRISH (BU YERGA QARA!) ---
 async def main():
-    print("🚀 KC Studio boti barcha premium funksiyalar bilan ishga tushdi!")
+    # Render o'chib qolmasligi uchun serverni yoqish (MUHIM!)
+    await start_server() 
+    
+    print("🚀 KC Studio boti ishga tushdi!")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
